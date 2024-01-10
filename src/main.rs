@@ -1,14 +1,16 @@
-#![allow(dead_code)]
 extern crate sdl2;
 
 pub mod displays;
 pub mod hexadecimal_sprites;
+pub mod input_driver;
 pub mod interpreters;
 pub mod keypads;
 pub mod memory;
 pub mod timers;
 pub mod waves;
 
+use input_driver::InputDriver;
+use timers::{DelayTimer, SoundTimer};
 use waves::Audio;
 
 use crate::memory::Memory;
@@ -19,25 +21,19 @@ fn main() -> Result<(), String> {
     let video_subsystem = sdl_context.video()?;
     let audio_subsystem = sdl_context.audio()?;
 
-    let window = video_subsystem
-        .window("Chip8", 800, 600)
-        .position_centered()
-        .opengl()
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let file_path = "foobar.txt";
-    let mut program: Memory = Memory::new(file_path)?;
+    let file_path = "games/MAZE";
+    let program: Memory = Memory::new(file_path)?;
 
     // create Interpreter
-    let display = Display::new(window)?;
+    let display = Display::new(video_subsystem)?;
     let audio = Audio::new(audio_subsystem)?;
+    let input = InputDriver::new(&sdl_context);
+    let delay_timer = DelayTimer { value: 0 };
+    let sound_timer = SoundTimer::new(audio);
 
-    let mut interpreter = Interpreter::new(&mut program, display, audio);
+    let mut interpreter = Interpreter::new(program, display, input, sound_timer, delay_timer);
 
-    // pass pump to execute program
-    let mut event_pump = sdl_context.event_pump()?;
-    interpreter.execute_program(&mut event_pump, 30);
+    interpreter.execute_program(60);
 
     Ok(())
 }

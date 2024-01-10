@@ -3,64 +3,96 @@ extern crate sdl2;
 use sdl2::pixels::Color;
 use sdl2::rect::Rect;
 use sdl2::render::WindowCanvas;
-use sdl2::video::Window;
+use sdl2::VideoSubsystem;
 
-const GRID_X_SIZE: usize = 64;
-const GRID_Y_SIZE: usize = 32;
-// TODO make configurable
 const DOT_SIZE_IN_PXS: u32 = 20;
 
-const DESTRUCTURE_U8: [u8; 8] = [0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01];
+const GRID_WIDTH: usize = 64;
+const GRID_HEIGHT: usize = 32;
 
-struct GamePixels {
-    value: [[u8; GRID_Y_SIZE]; GRID_X_SIZE],
+const SCREEN_WIDTH: u32 = GRID_WIDTH as u32 * DOT_SIZE_IN_PXS;
+const SCREEN_HEIGHT: u32 = GRID_HEIGHT as u32 * DOT_SIZE_IN_PXS;
+
+const BACKGROUND_COLOR: Color = Color::RGB(30, 30, 30);
+
+pub struct GamePixels {
+    value: [[u8; GRID_HEIGHT]; GRID_WIDTH],
 }
 
 impl GamePixels {
-    fn new() -> GamePixels {
+    pub fn new() -> GamePixels {
         GamePixels {
-            value: [[0; GRID_Y_SIZE]; GRID_X_SIZE],
+            value: [[0; GRID_HEIGHT]; GRID_WIDTH],
         }
     }
-    fn to_rects(&self) -> Vec<Rect> {
+    pub fn to_rects(&self) -> Vec<(Rect, Color)> {
         let mut rects = Vec::new();
         for (row_idx, row) in self.value.iter().enumerate() {
             for (col_idx, col) in row.iter().enumerate() {
-                if *col == 1 {
-                    let rect = Rect::new(
-                        (col_idx * GRID_X_SIZE) as i32,
-                        (row_idx * GRID_Y_SIZE) as i32,
-                        DOT_SIZE_IN_PXS,
-                        DOT_SIZE_IN_PXS,
-                    );
-                    rects.push(rect);
-                }
+                let x = col_idx as u32 * DOT_SIZE_IN_PXS;
+                let y = row_idx as u32 * DOT_SIZE_IN_PXS;
+                let rect = Rect::new(
+                    x as i32,
+                    y as i32,
+                    (col_idx as u32 * DOT_SIZE_IN_PXS),
+                    row_idx as u32 * DOT_SIZE_IN_PXS,
+                );
+                rects.push(if *col == 1 {
+                    (rect, Color::GREEN)
+                } else {
+                    (rect, BACKGROUND_COLOR)
+                });
             }
         }
         rects
     }
 
-    fn byte_to_binary(byte: u8) -> [u8; 8] {
-        DESTRUCTURE_U8.map(|mask| if (mask & byte) > 0 { 1 } else { 0 })
-    }
-
-    fn fill_in_bytes(&mut self, bytes: &[u8], (x, y): (usize, usize)) -> bool {
+    pub fn fill_in_bytes(&mut self, bytes: &[u8], (x, y): (usize, usize)) -> bool {
         let mut total_collision: bool = false;
 
-        for (y_idx, b) in bytes.iter().enumerate() {
-            let bit_array = GamePixels::byte_to_binary(*b);
-            let cur_y_coord = (y + y_idx) % GRID_Y_SIZE;
+        for (y_idx, byte) in bytes.iter().enumerate() {
+            let cur_y_coord = (y + y_idx) % GRID_HEIGHT;
 
-            for (x_idx, bit) in bit_array.iter().enumerate() {
-                let curr_val = &mut self.value[cur_y_coord][(x + x_idx) % GRID_X_SIZE];
-                if *curr_val == 1 && *curr_val ^ *bit == 0 {
+            for x_idx in 0..8 {
+                let color = byte >> (7 - x_idx) & 1;
+                let curr_val = &mut self.value[cur_y_coord][(x + x_idx as usize) % GRID_WIDTH];
+                if *curr_val == 1 && *curr_val ^ color == 0 {
                     total_collision = true
                 }
-                *curr_val = *bit;
+                *curr_val ^= color;
             }
         }
 
         total_collision
+    }
+}
+
+pub trait Drawable {
+    /*
+     * Render the binary representation of `bytes` starting at start_coord.
+     * If the bits to render expand outside of the display, wrap.
+     *
+     * Returns True if collision was detected, else False
+     */
+    fn draw_at(&mut self, bytes: &[u8], start_coord: (usize, usize)) -> bool;
+    fn clear(&mut self);
+}
+
+impl Drawable for Display {
+    fn draw_at(&mut self, bytes: &[u8], start_coord: (usize, usize)) -> bool {
+        self.draw_background();
+        // convert each byte to [u8;8] - these should be "stacked"
+        // update `pixels` with these bits starting at start_coord -- track if there is collision
+        let collided = self.pixels.fill_in_bytes(bytes, start_coord);
+        // display pixels
+        self.draw_pixels().unwrap();
+
+        collided
+    }
+
+    fn clear(&mut self) {
+        self.pixels = GamePixels::new();
+        self.draw_background()
     }
 }
 
@@ -70,7 +102,14 @@ pub struct Display {
 }
 
 impl Display {
-    pub fn new(window: Window) -> Result<Display, String> {
+    pub fn new(video_subsystem: VideoSubsystem) -> Result<Display, String> {
+        let window = video_subsystem
+            .window("Chip8", SCREEN_WIDTH, SCREEN_HEIGHT)
+            .position_centered()
+            .opengl()
+            .build()
+            .map_err(|e| e.to_string())?;
+
         window
             .into_canvas()
             .build()
@@ -80,39 +119,28 @@ impl Display {
                 pixels: GamePixels::new(),
             })
     }
-    pub fn clear_display(&mut self) {}
-    /*
-     * Render the binary representation of `bytes` starting at start_coord.
-     * If the bits to render expand outside of the display, wrap.
-     *
-     * Returns True if collision was detected, else False
-     */
-    pub fn draw_at(&mut self, bytes: &[u8], start_coord: (usize, usize)) -> bool {
-        self.draw_background();
-        // convert each byte to [u8;8] - these should be "stacked"
-        // update `pixels` with these bits starting at start_coord -- track if there is collision
-        let collided = self.pixels.fill_in_bytes(bytes, start_coord);
-        // display pixels
-        self.draw_pixels().unwrap();
-
-        // return whether collision was detected or not as bool.
-        collided
-    }
-
-    pub fn clear(&mut self) {
-        self.draw_background()
-    }
 
     pub fn draw_background(&mut self) {
-        self.canv.set_draw_color(Color::RGB(30, 30, 30));
+        self.canv.set_draw_color(BACKGROUND_COLOR);
         self.canv.clear()
     }
     fn draw_pixels(&mut self) -> Result<(), String> {
         self.canv.set_draw_color(Color::WHITE);
-        self.canv.draw_rects(&self.pixels.to_rects())?;
-        self.canv.present();
+        self.pixels.to_rects().iter().for_each(|(rect, color)| {
+            self.canv.set_draw_color(*color);
+            self.canv.draw_rect(*rect).unwrap()
+        });
+        let drawn = self
+            .pixels
+            .to_rects()
+            .iter()
+            .map(|(rect, color)| {
+                self.canv.set_draw_color(*color);
+                self.canv.fill_rect(*rect)
+            })
+            .collect::<Result<Vec<_>, _>>();
 
-        Ok(())
+        drawn.map(|_| self.canv.present())
     }
 }
 
@@ -124,12 +152,6 @@ mod tests {
         T: IntoIterator<Item = (usize, usize)>,
     {
         one_coords.into_iter().all(|(x, y)| pixels.value[y][x] == 1)
-    }
-
-    #[test]
-    fn destruct_byte() {
-        let bits = GamePixels::byte_to_binary(255);
-        assert!(bits.into_iter().all(|x| x == 1))
     }
 
     #[test]

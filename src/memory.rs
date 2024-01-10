@@ -1,4 +1,4 @@
-use crate::hexadecimal_sprites::HEXADECIMAL_SPRITES;
+use crate::hexadecimal_sprites::{HEXADECIMAL_SPRITES, HEX_SIZE};
 use std::cmp::min;
 use std::fs::read;
 
@@ -13,17 +13,20 @@ pub struct Memory {
 impl Memory {
     pub fn query_hex_location(digit: u8) -> Option<u8> {
         if digit < 16 {
-            Some(digit)
+            Some(digit * (HEX_SIZE as u8))
         } else {
             None
         }
     }
 
-    // TODO ensure we properly pad so hexadecimals are situated correctly in RAM
     fn load_hex(mem_arr: &mut [u8; MEM_SIZE]) {
-        for (i, sprite) in HEXADECIMAL_SPRITES.iter().enumerate() {
+        let hex_iter = (0..(HEXADECIMAL_SPRITES.len() * HEX_SIZE))
+            .step_by(HEX_SIZE)
+            .zip(HEXADECIMAL_SPRITES);
+
+        for (mem_start, sprite) in hex_iter {
             for (si, byte) in sprite.iter().enumerate() {
-                mem_arr[i + si] = *byte;
+                mem_arr[mem_start + si] = *byte;
             }
         }
     }
@@ -33,12 +36,18 @@ impl Memory {
      */
     pub fn read_instruction(&self, idx: u16) -> u16 {
         if let [upper, lower, ..] = &self.value[idx as usize..idx as usize + 2] {
-            (*upper as u16) << 8 + *lower as u16
+            (*upper as u16) << 8 | *lower as u16
         } else {
             panic!("Memory out of bounds.")
         }
     }
 
+    pub fn empty() -> Memory {
+        let mut mem_arr = [0; MEM_SIZE];
+        Memory::load_hex(&mut mem_arr);
+
+        Memory { value: mem_arr }
+    }
     pub fn new(file_path: &str) -> Result<Memory, String> {
         read(file_path)
             .map(|bytes| {
