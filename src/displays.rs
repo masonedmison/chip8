@@ -16,35 +16,14 @@ const SCREEN_HEIGHT: u32 = GRID_HEIGHT as u32 * DOT_SIZE_IN_PXS;
 const BACKGROUND_COLOR: Color = Color::RGB(30, 30, 30);
 
 pub struct GamePixels {
-    value: [[u8; GRID_HEIGHT]; GRID_WIDTH],
+    pub value: [[u8; GRID_WIDTH]; GRID_HEIGHT],
 }
 
 impl GamePixels {
     pub fn new() -> GamePixels {
         GamePixels {
-            value: [[0; GRID_HEIGHT]; GRID_WIDTH],
+            value: [[0; GRID_WIDTH]; GRID_HEIGHT],
         }
-    }
-    pub fn to_rects(&self) -> Vec<(Rect, Color)> {
-        let mut rects = Vec::new();
-        for (row_idx, row) in self.value.iter().enumerate() {
-            for (col_idx, col) in row.iter().enumerate() {
-                let x = col_idx as u32 * DOT_SIZE_IN_PXS;
-                let y = row_idx as u32 * DOT_SIZE_IN_PXS;
-                let rect = Rect::new(
-                    x as i32,
-                    y as i32,
-                    (col_idx as u32 * DOT_SIZE_IN_PXS),
-                    row_idx as u32 * DOT_SIZE_IN_PXS,
-                );
-                rects.push(if *col == 1 {
-                    (rect, Color::GREEN)
-                } else {
-                    (rect, BACKGROUND_COLOR)
-                });
-            }
-        }
-        rects
     }
 
     pub fn fill_in_bytes(&mut self, bytes: &[u8], (x, y): (usize, usize)) -> bool {
@@ -52,13 +31,10 @@ impl GamePixels {
 
         for (y_idx, byte) in bytes.iter().enumerate() {
             let cur_y_coord = (y + y_idx) % GRID_HEIGHT;
-
             for x_idx in 0..8 {
-                let color = byte >> (7 - x_idx) & 1;
+                let color = (byte >> (7 - x_idx)) & 1;
                 let curr_val = &mut self.value[cur_y_coord][(x + x_idx as usize) % GRID_WIDTH];
-                if *curr_val == 1 && *curr_val ^ color == 0 {
-                    total_collision = true
-                }
+                if (color & *curr_val) == 1 { total_collision = true }
                 *curr_val ^= color;
             }
         }
@@ -80,7 +56,6 @@ pub trait Drawable {
 
 impl Drawable for Display {
     fn draw_at(&mut self, bytes: &[u8], start_coord: (usize, usize)) -> bool {
-        self.draw_background();
         // convert each byte to [u8;8] - these should be "stacked"
         // update `pixels` with these bits starting at start_coord -- track if there is collision
         let collided = self.pixels.fill_in_bytes(bytes, start_coord);
@@ -110,14 +85,16 @@ impl Display {
             .build()
             .map_err(|e| e.to_string())?;
 
-        window
-            .into_canvas()
-            .build()
-            .map_err(|e| e.to_string())
-            .map(|canv| Display {
-                canv: canv,
-                pixels: GamePixels::new(),
-            })
+        let mut canvas = window.into_canvas().build().map_err(|e| e.to_string())?;
+
+        canvas.set_draw_color(BACKGROUND_COLOR);
+        canvas.clear();
+        canvas.present();
+
+        Ok(Display {
+            canv: canvas,
+            pixels: GamePixels::new(),
+        })
     }
 
     pub fn draw_background(&mut self) {
@@ -125,22 +102,23 @@ impl Display {
         self.canv.clear()
     }
     fn draw_pixels(&mut self) -> Result<(), String> {
-        self.canv.set_draw_color(Color::WHITE);
-        self.pixels.to_rects().iter().for_each(|(rect, color)| {
-            self.canv.set_draw_color(*color);
-            self.canv.draw_rect(*rect).unwrap()
-        });
-        let drawn = self
-            .pixels
-            .to_rects()
-            .iter()
-            .map(|(rect, color)| {
-                self.canv.set_draw_color(*color);
-                self.canv.fill_rect(*rect)
-            })
-            .collect::<Result<Vec<_>, _>>();
+        for (y, row) in self.pixels.value.iter().enumerate() {
+            for (x, bit) in row.iter().enumerate() {
+                let x = x as u32 * DOT_SIZE_IN_PXS;
+                let y = y as u32 * DOT_SIZE_IN_PXS;
+                let rect = Rect::new(x as i32, y as i32, DOT_SIZE_IN_PXS, DOT_SIZE_IN_PXS);
+                self.canv.set_draw_color(if *bit == 1 {
+                    Color::GREEN
+                } else {
+                    BACKGROUND_COLOR
+                });
 
-        drawn.map(|_| self.canv.present())
+                self.canv.fill_rect(rect).unwrap();
+            }
+        }
+
+        self.canv.present();
+        Ok(())
     }
 }
 

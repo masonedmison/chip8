@@ -9,6 +9,8 @@ pub mod memory;
 pub mod timers;
 pub mod waves;
 
+use std::env;
+
 use input_driver::InputDriver;
 use timers::{DelayTimer, SoundTimer};
 use waves::Audio;
@@ -17,11 +19,14 @@ use crate::memory::Memory;
 use crate::{displays::Display, interpreters::Interpreter};
 
 fn main() -> Result<(), String> {
+    let args: Vec<String> = env::args().collect();
+
+    let file_path = args.get(1).ok_or("Usage: chip8 /path/to/file")?;
+
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
     let audio_subsystem = sdl_context.audio()?;
 
-    let file_path = "games/MAZE";
     let program: Memory = Memory::new(file_path)?;
 
     // create Interpreter
@@ -33,7 +38,7 @@ fn main() -> Result<(), String> {
 
     let mut interpreter = Interpreter::new(program, display, input, sound_timer, delay_timer);
 
-    interpreter.execute_program(60);
+    interpreter.execute_program();
 
     Ok(())
 }

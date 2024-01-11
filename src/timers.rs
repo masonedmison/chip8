@@ -52,10 +52,12 @@ impl SoundTimer {
             sounding: false,
         }
     }
-    fn action(&self) {
+    fn action(&mut self) {
         if self.value > 0 && !self.sounding {
+            self.sounding = true;
             self.audio.sound();
         } else if self.value <= 0 && self.sounding {
+            self.sounding = false;
             self.audio.pause();
         }
     }

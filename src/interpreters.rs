@@ -58,13 +58,13 @@ where
         }
     }
 
-    pub fn execute_program(&mut self, fps: u32) {
-        let mut frame_ctr = 0;
-        let frame_sleep = Duration::from_secs(1) / fps;
+    pub fn execute_program(&mut self) {
+        let frame_sleep = Duration::from_millis(2);
         while let Ok(Keypad { keypad, .. }) = self.input_driver.poll() {
             std::thread::sleep(frame_sleep);
 
             self.keypad = keypad;
+
 
             let opcode = self.memory.read_instruction(self.registers.pc);
             match self.execute_opcode(opcode as u16) {
@@ -74,14 +74,11 @@ where
                 ProgramCounter::Jump(addr) => self.registers.pc = addr as u16,
             }
 
-            if (frame_ctr % 60) == 0 {
-                self.delay_timer.decrement();
-                self.sound_timer.decrement();
+            self.delay_timer.decrement();
+            self.sound_timer.decrement();
 
-                frame_ctr = 0;
-            }
 
-            frame_ctr += 1;
+
         }
     }
 
@@ -99,7 +96,8 @@ where
                     self.keypad = keypad;
                     break 'until;
                 }
-                _ => (),
+                Err(_) => panic!("interuppted"),
+                _ => ()
             }
         }
         result
@@ -113,14 +111,13 @@ where
                 ProgramCounter::Next
             }
             Opcodes::RET => {
-                let pc = ProgramCounter::Jump(self.stack[self.registers.sc as usize] as usize);
-                self.registers.sc -= 1;
-                pc
+                self.registers.sp -= 1;
+                ProgramCounter::Jump(self.stack[self.registers.sp] as usize)
             }
             Opcodes::JP(Addr(value)) => ProgramCounter::Jump(value as usize),
             Opcodes::CALL(Addr(value)) => {
-                self.registers.sc += 1;
-                self.stack[self.registers.sc as usize] = self.registers.pc;
+                self.stack[self.registers.sp] = self.registers.pc + OPCODE_SIZE;
+                self.registers.sp += 1;
                 ProgramCounter::Jump(value as usize)
             }
             Opcodes::SEByte(RegisterN(x), Byte(value)) => {
@@ -136,8 +133,11 @@ where
                 self.registers.v[x] = value;
                 ProgramCounter::Next
             }
-            Opcodes::ADDByte(RegisterN(x), Byte(value)) => {
-                self.registers.v[x] += value;
+            Opcodes::ADDByte(RegisterN(x), Byte(kk)) => {
+                let vx = self.registers.v[x] as u16;
+                let val = kk as u16;
+
+                self.registers.v[x] = (vx + val) as u8;
                 ProgramCounter::Next
             }
             Opcodes::LDReg(RegisterN(x), RegisterN(y)) => {
@@ -176,16 +176,12 @@ where
                 } else {
                     self.registers.set_vf(0)
                 }
-                self.registers.v[x] -= vy;
+                self.registers.v[x] = vx.wrapping_sub(vy);
                 ProgramCounter::Next
             }
             Opcodes::SHR(RegisterN(x)) => {
                 let vx = self.registers.v[x];
-                if 1 & vx == 1 {
-                    self.registers.set_vf(1)
-                } else {
-                    self.registers.set_vf(0)
-                }
+                self.registers.set_vf(vx & 1);
                 self.registers.v[x] /= 2;
                 ProgramCounter::Next
             }
@@ -197,7 +193,7 @@ where
                 } else {
                     self.registers.set_vf(0)
                 }
-                self.registers.v[x] = vy - vx;
+                self.registers.v[x] = vy.wrapping_sub(vx);
                 ProgramCounter::Next
             }
             Opcodes::SHL(RegisterN(x)) => {
@@ -224,8 +220,8 @@ where
                 ProgramCounter::Jump(addr as usize)
             }
             Opcodes::RND(RegisterN(x), Byte(kk)) => {
-                let a = rand::thread_rng().gen_range(0..=255) & kk;
-                self.registers.v[x] = a;
+                let mut rng = rand::thread_rng();
+                self.registers.v[x] = rng.gen::<u8>() & kk;
                 ProgramCounter::Next
             }
             Opcodes::DRW(RegisterN(x), RegisterN(y), Nibble(n)) => {
@@ -236,8 +232,12 @@ where
                 self.registers.set_vf(if collided { 1 } else { 0 });
                 ProgramCounter::Next
             }
-            Opcodes::SKP(RegisterN(x)) => ProgramCounter::Skip(self.keypad[x]),
-            Opcodes::SKNP(RegisterN(x)) => ProgramCounter::Skip(!self.keypad[x]),
+            Opcodes::SKP(RegisterN(x)) => {
+                ProgramCounter::Skip(self.keypad[self.registers.v[x] as usize])
+            }
+            Opcodes::SKNP(RegisterN(x)) => {
+                ProgramCounter::Skip(!self.keypad[self.registers.v[x] as usize])
+            }
             Opcodes::LDVXWITHDT(RegisterN(x)) => {
                 self.registers.v[x] = self.delay_timer.get();
                 ProgramCounter::Next
@@ -258,6 +258,7 @@ where
             }
             Opcodes::ADDI(RegisterN(x)) => {
                 self.registers.i += self.registers.v[x] as u16;
+                self.registers.set_vf(if self.registers.i > 0x0F00 { 1 } else { 0 });
                 ProgramCounter::Next
             }
             Opcodes::LDSPRITE(RegisterN(x)) => {
@@ -277,7 +278,7 @@ where
             }
             Opcodes::LDTHROUGH(RegisterN(x)) => {
                 let mem_loc_start = self.registers.i;
-                self.registers.v[0..x as usize]
+                self.registers.v[0..=x as usize]
                     .iter()
                     .zip(mem_loc_start..)
                     .for_each(|(value, mem_loc)| {
@@ -301,7 +302,7 @@ struct Registers {
     v: [u8; 16],
     i: u16,
     pc: u16,
-    sc: u8,
+    sp: usize,
 }
 
 impl Registers {
@@ -312,7 +313,7 @@ impl Registers {
             v: [0; 16],
             i: STARTING_MEMORY,
             pc: STARTING_MEMORY,
-            sc: 0,
+            sp: 0,
         }
     }
 

@@ -16,16 +16,23 @@ mod tests {
             TestTimer::new(42),
         )
     }
+    fn byte_to_bit_array(byte: u8) -> [u8; 8] {
+        let mut arr = [0; 8];
+        for i in 0..8 {
+            arr[i] = byte >> (7 - i) & 1;
+        }
+        arr
+    }
     #[test]
     fn test_ret() {
         let mut interpreter = make_interpreter();
 
         let opcode = 0x00EE;
         interpreter.stack[1] = 200;
-        interpreter.registers.sc = 1;
+        interpreter.registers.sp = 2;
         let pc = interpreter.execute_opcode(opcode);
         assert_eq!(pc, ProgramCounter::Jump(200));
-        assert_eq!(interpreter.registers.sc, 0)
+        assert_eq!(interpreter.registers.sp, 1)
     }
     #[test]
     fn test_jpaddr() {
@@ -41,8 +48,8 @@ mod tests {
         interpreter.registers.pc = 0xf01;
         let pc = interpreter.execute_opcode(opcode);
         assert_eq!(pc, ProgramCounter::Jump(0xf02));
-        let ts = interpreter.stack[interpreter.registers.sc as usize];
-        assert_eq!(ts, 0xf01)
+        let ts = interpreter.stack[interpreter.registers.sp - 1 as usize];
+        assert_eq!(ts, 0xf03)
     }
     #[test]
     fn test_sevxbyte() {
@@ -83,7 +90,7 @@ mod tests {
         let mut interpreter = make_interpreter();
         interpreter.registers.v[1] = 128;
         interpreter.registers.v[2] = 129;
-         interpreter.execute_opcode(opcode);
+        interpreter.execute_opcode(opcode);
         assert_eq!(interpreter.registers.v[1], 1);
         assert_eq!(interpreter.registers.v[0xf], 1)
     }
@@ -97,23 +104,118 @@ mod tests {
     }
     #[test]
     fn test_drw_simple() {
+        let opcode = 0xD122;
         let mut interpreter = make_interpreter();
-        assert!(true)
+        let i: usize = 0x200;
+        interpreter.registers.i = i as u16;
+
+        let byte = 0x9f;
+        let bit_arr = byte_to_bit_array(byte);
+
+        interpreter.memory.value[i] = 0x9f;
+        interpreter.memory.value[i + 1] = 0x9f;
+
+        let x: usize = 0;
+        let y: usize = 0;
+        interpreter.registers.v[1] = x as u8;
+        interpreter.registers.v[2] = y as u8;
+
+        interpreter.execute_opcode(opcode);
+
+        let row1 = &interpreter.display.pixels.value[y][x..x + 8];
+        let row2 = &interpreter.display.pixels.value[y + 1][x..x + 8];
+        assert_eq!(row1, bit_arr);
+        assert_eq!(row2, bit_arr);
+        assert_eq!(interpreter.registers.v[0xf], 0)
     }
     #[test]
     fn test_drw_collision() {
+        let opcode = 0xD122;
         let mut interpreter = make_interpreter();
-        assert!(true)
+        let i: usize = 0x200;
+        interpreter.registers.i = i as u16;
+
+        // first call to draw
+        let byte_fw = 0x9f;
+        let bit_arr_fw = byte_to_bit_array(byte_fw);
+
+        interpreter.memory.value[i] = 0x9f;
+        interpreter.memory.value[i + 1] = 0x9f;
+
+        interpreter.registers.v[1] = 0 as u8;
+        interpreter.registers.v[2] = 0 as u8;
+
+        interpreter.execute_opcode(opcode);
+
+        // second call to draw
+        let byte_sw = 0xfc;
+        let bit_arr_sw = byte_to_bit_array(byte_fw ^ byte_sw);
+        interpreter.memory.value[i] = byte_sw;
+
+        interpreter.registers.v[1] = 0 as u8;
+        interpreter.registers.v[2] = 1 as u8;
+        let opcode = 0xD121;
+        interpreter.execute_opcode(opcode);
+
+        let row1 = &interpreter.display.pixels.value[0][0..8];
+        let row2 = &interpreter.display.pixels.value[1][0..8];
+        assert_eq!(row1, bit_arr_fw);
+        assert_eq!(row2, bit_arr_sw);
+        assert_eq!(interpreter.registers.v[0xf], 1)
     }
     #[test]
     fn test_drw_horizontal_wrap() {
+        let opcode = 0xD121;
         let mut interpreter = make_interpreter();
-        assert!(true)
+        let i: usize = 0x200;
+        interpreter.registers.i = i as u16;
+
+        let byte = 0x9f;
+        let bit_arr = byte_to_bit_array(byte);
+
+        interpreter.memory.value[i] = 0x9f;
+
+        let x: usize = 62;
+        let y: usize = 0;
+        interpreter.registers.v[1] = x as u8;
+        interpreter.registers.v[2] = y as u8;
+
+        interpreter.execute_opcode(opcode);
+
+        let first_row_part = &interpreter.display.pixels.value[y][0..6];
+        let second_row_part = &interpreter.display.pixels.value[y][62..];
+        assert_eq!(first_row_part, &bit_arr[2..]);
+        assert_eq!(second_row_part, &bit_arr[0..2]);
+        assert_eq!(interpreter.registers.v[0xf], 0)
     }
     #[test]
     fn test_drw_vertical_wrap() {
+        let opcode = 0xD123;
         let mut interpreter = make_interpreter();
-        assert!(true)
+        let i: usize = 0x200;
+        interpreter.registers.i = i as u16;
+
+        let byte = 0x9f;
+        let bit_arr = byte_to_bit_array(byte);
+
+        interpreter.memory.value[i] = 0x9f;
+        interpreter.memory.value[i + 1] = 0x9f;
+        interpreter.memory.value[i + 2] = 0x9f;
+
+        let x: usize = 0;
+        let y: usize = 31;
+        interpreter.registers.v[1] = x as u8;
+        interpreter.registers.v[2] = y as u8;
+
+        interpreter.execute_opcode(opcode);
+
+        let first_row = &interpreter.display.pixels.value[0][..8];
+        let second_row = &interpreter.display.pixels.value[1][..8];
+        let last_row = &interpreter.display.pixels.value[y][..8];
+        assert_eq!(first_row, bit_arr);
+        assert_eq!(second_row, bit_arr);
+        assert_eq!(last_row, bit_arr);
+        assert_eq!(interpreter.registers.v[0xf], 0)
     }
     #[test]
     fn test_ldfvx() {
@@ -155,6 +257,7 @@ mod tests {
         assert_eq!(interpreter.registers.v[2], 12);
         assert_eq!(interpreter.registers.v[3], 13);
     }
+    // TODO test keyboard instructions
     mod mocks {
         use sdl2::{event::Event, keyboard::Keycode};
 
@@ -166,7 +269,7 @@ mod tests {
         };
 
         pub(crate) struct TestDisplay {
-            pixels: GamePixels,
+            pub(crate) pixels: GamePixels,
         }
         impl TestDisplay {
             pub(crate) fn new() -> TestDisplay {
