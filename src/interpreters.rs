@@ -203,7 +203,7 @@ where
                 } else {
                     self.registers.set_vf(0)
                 }
-                self.registers.v[x] *= 2;
+                self.registers.v[x] = vx.wrapping_mul(2);
                 ProgramCounter::Next
             }
             Opcodes::SNEReg(RegisterN(x), RegisterN(y)) => {
