@@ -60,8 +60,10 @@ where
     }
 
     pub fn execute_program(&mut self) {
-        let frame_sleep = Duration::from_millis(2);
+        let frame_sleep = Duration::from_millis(1);
+        let mut fc = 0;
         while let Ok(Keypad { keypad, .. }) = self.input_driver.poll() {
+
             std::thread::sleep(frame_sleep);
 
             self.keypad = keypad;
@@ -74,8 +76,13 @@ where
                 ProgramCounter::Jump(addr) => self.registers.pc = addr as u16,
             }
 
-            self.delay_timer.decrement();
-            self.sound_timer.decrement();
+            // decrement timers 60 times per second.
+            if fc % 16 == 0 {
+                self.delay_timer.decrement();
+                self.sound_timer.decrement();
+                fc = 0;
+            }
+            fc += 1;
         }
     }
 
