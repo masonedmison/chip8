@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use rand::Rng;
+use unwrap::unwrap;
 
 extern crate sdl2;
 
@@ -65,7 +66,6 @@ where
 
             self.keypad = keypad;
 
-
             let opcode = self.memory.read_instruction(self.registers.pc);
             match self.execute_opcode(opcode as u16) {
                 ProgramCounter::Next => self.registers.pc += OPCODE_SIZE,
@@ -76,9 +76,6 @@ where
 
             self.delay_timer.decrement();
             self.sound_timer.decrement();
-
-
-
         }
     }
 
@@ -97,14 +94,18 @@ where
                     break 'until;
                 }
                 Err(_) => panic!("interuppted"),
-                _ => ()
+                _ => (),
             }
         }
         result
     }
 
     fn execute_opcode(&mut self, raw_opcode: u16) -> ProgramCounter {
-        let opcode = Opcodes::from_bytes(raw_opcode).expect("Expected a valid opcode.");
+        let opcode = unwrap!(
+            Opcodes::from_bytes(raw_opcode),
+            "Expected a valid opcode but got {:#x}",
+            raw_opcode
+        );
         match opcode {
             Opcodes::CLS => {
                 self.display.clear();
@@ -258,7 +259,8 @@ where
             }
             Opcodes::ADDI(RegisterN(x)) => {
                 self.registers.i += self.registers.v[x] as u16;
-                self.registers.set_vf(if self.registers.i > 0x0F00 { 1 } else { 0 });
+                self.registers
+                    .set_vf(if self.registers.i > 0x0F00 { 1 } else { 0 });
                 ProgramCounter::Next
             }
             Opcodes::LDSPRITE(RegisterN(x)) => {
